@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Structural Analysis AI</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <header>
+        <h1>StructScan AI</h1>
+    </header>
+
+    <main>
+        <div class="glass-card camera-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+            <div class="scan-overlay" id="scanOverlay"></div>
+        </div>
+
+        <div class="controls">
+            <button id="switchCamBtn" class="btn"
+                style="background: var(--glass-bg); color: #fff; border: 1px solid var(--glass-border);">
+                📷 Switch
+            </button>
+            <button id="captureBtn" class="btn">
+                <span class="btn-text">Analyze Structure</span>
+                <span class="loader" id="loader"></span>
+            </button>
+        </div>
+
+        <div id="results">
+            <div class="glass-card score-card">
+                <div>
+                    <div style="font-size: 0.9rem; color: #94a3b8;">Damage Score</div>
+                    <div class="score-circle" id="damageScore">0</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.9rem; color: #94a3b8; margin-bottom: 5px;">Safety Status</div>
+                    <span class="safety-badge" id="safetyRating">Safe</span>
+                </div>
+            </div>
+
+            <div class="glass-card details-card">
+                <h3>Identified Issues</h3>
+                <ul id="issuesList">
+                    <!-- Issues will be populated here -->
+                </ul>
+            </div>
+
+            <div class="glass-card details-card">
+                <h3>Maintenance Suggestions</h3>
+                <ul id="suggestionsList">
+                    <!-- Suggestions will be populated here -->
+                </ul>
+            </div>
+
+            <div class="glass-card details-card">
+                <h3>Summary</h3>
+                <p id="summaryText" style="color: #cbd5e1; font-size: 0.95rem; line-height: 1.6;"></p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('captureBtn');
+        const switchCamBtn = document.getElementById('switchCamBtn');
+        const scanOverlay = document.getElementById('scanOverlay');
+        const loader = document.getElementById('loader');
+        const btnText = document.querySelector('.btn-text');
+        const resultsDiv = document.getElementById('results');
+
+        let currentFacingMode = 'environment';
+
+        // Access Camera
+        async function startCamera() {
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode }
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Could not access camera. Please ensure you have granted permission.");
+            }
+        }
+
+        startCamera();
+
+        switchCamBtn.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            startCamera();
+        });
+
+        captureBtn.addEventListener('click', async () => {
+            // UI State: Loading
+            captureBtn.disabled = true;
+            btnText.textContent = "Analyzing...";
+            loader.style.display = "inline-block";
+            scanOverlay.style.display = "block";
+            resultsDiv.style.display = "none";
+
+            // Capture Image
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Convert to Blob
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('file', blob, 'capture.jpg');
+
+                try {
+                    const response = await fetch('/analyze', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+                    displayResults(data);
+
+                } catch (error) {
+                    console.error("Error analyzing:", error);
+                    alert("Analysis failed. Please try again.");
+                } finally {
+                    // UI State: Reset
+                    captureBtn.disabled = false;
+                    btnText.textContent = "Analyze Structure";
+                    loader.style.display = "none";
+                    scanOverlay.style.display = "none";
+                }
+            }, 'image/jpeg', 0.8);
+        });
+
+        function displayResults(data) {
+            resultsDiv.style.display = 'flex';
+
+            // Score
+            document.getElementById('damageScore').textContent = data.damage_score;
+
+            // Safety Rating
+            const safetyBadge = document.getElementById('safetyRating');
+            safetyBadge.textContent = data.safety_rating;
+            safetyBadge.className = 'safety-badge'; // reset
+            if (data.safety_rating.toLowerCase().includes('safe')) safetyBadge.classList.add('safety-safe');
+            else if (data.safety_rating.toLowerCase().includes('caution')) safetyBadge.classList.add('safety-caution');
+            else safetyBadge.classList.add('safety-danger');
+
+            // Issues
+            const issuesList = document.getElementById('issuesList');
+            issuesList.innerHTML = '';
+            data.identified_issues.forEach(issue => {
+                const li = document.createElement('li');
+                li.innerHTML = `<strong>${issue.issue}</strong> <span style="font-size:0.8em; color:#94a3b8">(${issue.severity})</span>`;
+                issuesList.appendChild(li);
+            });
+
+            // Suggestions
+            const suggestionsList = document.getElementById('suggestionsList');
+            suggestionsList.innerHTML = '';
+            data.maintenance_suggestions.forEach(suggestion => {
+                const li = document.createElement('li');
+                li.textContent = suggestion;
+                suggestionsList.appendChild(li);
+            });
+
+            // Summary
+            document.getElementById('summaryText').textContent = data.inspection_summary;
+
+            // Scroll to results
+            resultsDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+
+</html>
